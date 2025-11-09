@@ -1,100 +1,93 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-import time
 import logging
+import tempfile
+import requests
+import io
+
+import numpy as np
+from PIL import Image
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from PIL import Image
-import numpy as np
-import io
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
-from tensorflow.keras.preprocessing import image
 
 app = Flask(__name__)
 CORS(app)
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Model download / path configuration
-MODEL_PATH = 'final_model_20251027_131112.h5'
-S3_BUCKET = os.environ.get('MODEL_S3_BUCKET')
-S3_KEY = os.environ.get('MODEL_S3_KEY', 'models/final_model_20251027_131112.h5')
+# ----------------------
+# Configuration
+# ----------------------
+MODEL_FILENAME = "final_model_20251027_131112.h5"
+MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
+MODEL_URL = os.environ.get("MODEL_URL")  # GitHub raw URL
 
-def download_model_from_s3(local_path, bucket, key, max_retries=3, backoff=2):
-    if not bucket:
-        logging.info("No S3 bucket configured (MODEL_S3_BUCKET); skipping download.")
-        return False
-    if os.path.exists(local_path):
-        logging.info("Model already exists at %s", local_path)
-        return True
+# ----------------------
+# Download model if missing
+# ----------------------
+def download_model():
+    if os.path.exists(MODEL_PATH):
+        logger.info("Model already exists at %s", MODEL_PATH)
+        return
 
-    s3 = boto3.client('s3',
-                      aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-                      aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'))
-    for attempt in range(1, max_retries + 1):
-        try:
-            logging.info("Downloading model from s3://%s/%s (attempt %d)...", bucket, key, attempt)
-            s3.download_file(bucket, key, local_path)
-            logging.info("Downloaded model to %s", local_path)
-            return True
-        except (BotoCoreError, ClientError, Exception) as e:
-            logging.warning("Model download attempt %d failed: %s", attempt, e)
-            if attempt < max_retries:
-                time.sleep(backoff ** attempt)
-            else:
-                logging.error("Failed to download model after %d attempts", attempt)
-                return False
+    if not MODEL_URL:
+        raise RuntimeError("MODEL_URL environment variable not set")
 
+    logger.info("Downloading model from GitHub...")
+    with requests.get(MODEL_URL, stream=True) as r:
+        r.raise_for_status()
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    tmp.write(chunk)
+            tmp_path = tmp.name
+    os.replace(tmp_path, MODEL_PATH)
+    logger.info("Model downloaded to %s", MODEL_PATH)
 
-# Try to download the model from S3 before loading. If no S3 bucket is configured,
-# the code will expect the model to exist locally (e.g., tracked via Git LFS).
-if S3_BUCKET:
-    ok = download_model_from_s3(MODEL_PATH, S3_BUCKET, S3_KEY)
-    if not ok:
-        raise RuntimeError("Could not download model from S3; check MODEL_S3_BUCKET, AWS keys, and S3 key.")
-
-# Load the model
+# ----------------------
+# Load model
+# ----------------------
+download_model()
+logger.info("Loading model...")
 model = load_model(MODEL_PATH)
+logger.info("Model loaded successfully")
+
+# ----------------------
+# Image preprocessing
+# ----------------------
 def preprocess_image(image_bytes):
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    img = img.resize((224, 224))  
+    img = img.resize((224, 224))
     img_array = np.array(img) / 255.0
     return np.expand_dims(img_array, axis=0)
+
+# Soil class names
 class_names = [
-    'Clay',
-    'Loam',
-    'Loamy Sand',
-    'Non-soil',
-    'Sand',
-    'Sandy Clay Loam',
-    'Sandy Loam',
-    'Silt',
-    'Silty Clay',
-    'Silty Loam'
+    'Clay', 'Loam', 'Loamy Sand', 'Non-soil', 'Sand',
+    'Sandy Clay Loam', 'Sandy Loam', 'Silt', 'Silty Clay', 'Silty Loam'
 ]
 
+# ----------------------
+# Prediction endpoint
+# ----------------------
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
         if 'image' not in request.files:
             return jsonify({'error': 'No image file'}), 400
 
-        image = request.files['image']
-        image_bytes = image.read()
+        image_file = request.files['image']
+        image_bytes = image_file.read()
 
-        # Process the image
         processed = preprocess_image(image_bytes)
-
-        # Make prediction
         prediction = model.predict(processed)
         predicted_class_index = int(np.argmax(prediction))
         predicted_class = class_names[predicted_class_index]
-        confidence = float(np.max(prediction))  # Get highest probability
+        confidence = float(np.max(prediction))
 
-        print('Predicted class:', predicted_class)
-        print(prediction)
+        logger.info('Predicted class: %s (confidence %.4f)', predicted_class, confidence)
 
         if confidence < 0.5:
             return jsonify({
@@ -108,8 +101,11 @@ def predict():
         })
 
     except Exception as e:
-        print("Prediction error:", e)
+        logger.exception("Prediction error: %s", e)
         return jsonify({'error': str(e)}), 500
 
+# ----------------------
+# Run locally (development)
+# ----------------------
 if __name__ == '__main__':
-    app.run(port=5001) 
+    app.run(port=5001, host='0.0.0.0')
