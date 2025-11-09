@@ -20,39 +20,55 @@ logger = logging.getLogger(__name__)
 # ----------------------
 # Configuration
 # ----------------------
-MODEL_FILENAME = "/app/final_model_20251027_131112.h5"
+MODEL_FILENAME = "final_model_20251027_131112.h5"
 MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
-MODEL_URL = os.environ.get("MODEL_URL", 'http://github.com/Cabarrubias-Ryan/SoilSnapModel/final_model_20251027_131112.h5')  # GitHub raw URL
+MODEL_URL = os.environ.get(
+    "MODEL_URL",
+    "https://github.com/Cabarrubias-Ryan/SoilSnapModel/raw/main/final_model_20251027_131112.h5"
+)
 
 # ----------------------
-# Download model if missing
+# Download model if missing or corrupted
 # ----------------------
 def download_model():
     if os.path.exists(MODEL_PATH):
-        logger.info("Model already exists at %s", MODEL_PATH)
-        return
+        # Try loading to verify file integrity
+        try:
+            _ = load_model(MODEL_PATH)
+            logger.info("Model exists and is valid at %s", MODEL_PATH)
+            return
+        except Exception as e:
+            logger.warning("Existing model is corrupted, will re-download. Error: %s", e)
 
     if not MODEL_URL:
         raise RuntimeError("MODEL_URL environment variable not set")
 
-    logger.info("Downloading model from GitHub...")
-    with requests.get(MODEL_URL, stream=True) as r:
-        r.raise_for_status()
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    tmp.write(chunk)
-            tmp_path = tmp.name
-    os.replace(tmp_path, MODEL_PATH)
-    logger.info("Model downloaded to %s", MODEL_PATH)
+    logger.info("Downloading model from %s...", MODEL_URL)
+    try:
+        with requests.get(MODEL_URL, stream=True) as r:
+            r.raise_for_status()
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        tmp.write(chunk)
+                tmp_path = tmp.name
+        os.replace(tmp_path, MODEL_PATH)
+        logger.info("Model downloaded successfully to %s", MODEL_PATH)
+    except Exception as e:
+        logger.exception("Failed to download model: %s", e)
+        raise RuntimeError("Cannot download model") from e
 
 # ----------------------
-# Load model
+# Load model safely
 # ----------------------
-download_model()
-logger.info("Loading model...")
-model = load_model(MODEL_PATH)
-logger.info("Model loaded successfully")
+try:
+    download_model()
+    logger.info("Loading model...")
+    model = load_model(MODEL_PATH)
+    logger.info("Model loaded successfully")
+except Exception as e:
+    logger.exception("Failed to load model: %s", e)
+    model = None  # Prevent app from crashing immediately
 
 # ----------------------
 # Image preprocessing
@@ -74,6 +90,9 @@ class_names = [
 # ----------------------
 @app.route('/predict', methods=['POST'])
 def predict():
+    if model is None:
+        return jsonify({'error': 'Model not loaded'}), 500
+
     try:
         if 'image' not in request.files:
             return jsonify({'error': 'No image file'}), 400
