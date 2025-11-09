@@ -5,6 +5,7 @@ import logging
 import tempfile
 import requests
 import io
+import h5py
 
 import numpy as np
 from PIL import Image
@@ -25,50 +26,50 @@ MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
 MODEL_URL = os.environ.get(
     "MODEL_URL",
     "https://github.com/Cabarrubias-Ryan/SoilSnapModel/raw/main/final_model_20251027_131112.h5"
-)
+)  # raw GitHub URL
 
 # ----------------------
-# Download model if missing or corrupted
+# Utility functions
 # ----------------------
+def is_valid_h5(filepath):
+    """Check if a file is a valid HDF5 file."""
+    try:
+        with h5py.File(filepath, 'r'):
+            return True
+    except OSError:
+        return False
+
 def download_model():
-    if os.path.exists(MODEL_PATH):
-        # Try loading to verify file integrity
-        try:
-            _ = load_model(MODEL_PATH)
-            logger.info("Model exists and is valid at %s", MODEL_PATH)
-            return
-        except Exception as e:
-            logger.warning("Existing model is corrupted, will re-download. Error: %s", e)
+    """Download the model if it does not exist or is invalid."""
+    if os.path.exists(MODEL_PATH) and is_valid_h5(MODEL_PATH):
+        logger.info("Model already exists and is valid at %s", MODEL_PATH)
+        return
 
     if not MODEL_URL:
         raise RuntimeError("MODEL_URL environment variable not set")
 
-    logger.info("Downloading model from %s...", MODEL_URL)
-    try:
-        with requests.get(MODEL_URL, stream=True) as r:
-            r.raise_for_status()
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        tmp.write(chunk)
-                tmp_path = tmp.name
-        os.replace(tmp_path, MODEL_PATH)
-        logger.info("Model downloaded successfully to %s", MODEL_PATH)
-    except Exception as e:
-        logger.exception("Failed to download model: %s", e)
-        raise RuntimeError("Cannot download model") from e
+    logger.info("Downloading model from GitHub...")
+    with requests.get(MODEL_URL, stream=True) as r:
+        r.raise_for_status()
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    tmp.write(chunk)
+            tmp_path = tmp.name
+
+    os.replace(tmp_path, MODEL_PATH)
+    logger.info("Model downloaded to %s (size: %d bytes)", MODEL_PATH, os.path.getsize(MODEL_PATH))
+
+    if not is_valid_h5(MODEL_PATH):
+        raise RuntimeError("Downloaded model is invalid/corrupted")
 
 # ----------------------
-# Load model safely
+# Load model
 # ----------------------
-try:
-    download_model()
-    logger.info("Loading model...")
-    model = load_model(MODEL_PATH)
-    logger.info("Model loaded successfully")
-except Exception as e:
-    logger.exception("Failed to load model: %s", e)
-    model = None  # Prevent app from crashing immediately
+download_model()
+logger.info("Loading model...")
+model = load_model(MODEL_PATH)
+logger.info("Model loaded successfully")
 
 # ----------------------
 # Image preprocessing
@@ -90,9 +91,6 @@ class_names = [
 # ----------------------
 @app.route('/predict', methods=['POST'])
 def predict():
-    if model is None:
-        return jsonify({'error': 'Model not loaded'}), 500
-
     try:
         if 'image' not in request.files:
             return jsonify({'error': 'No image file'}), 400
