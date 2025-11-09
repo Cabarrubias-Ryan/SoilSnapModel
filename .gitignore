@@ -13,3 +13,5 @@ final_model_*.h5
 *.keras
 *.hdf5
 .DS_Store
+
+!final_model_20251027_131112.h5
