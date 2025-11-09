@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 # ----------------------
 # Configuration
 # ----------------------
-MODEL_FILENAME = "final_model_20251027_131112.h5"
+MODEL_FILENAME = "/app/final_model_20251027_131112.h5"
 MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
-MODEL_URL = os.environ.get("MODEL_URL")  # GitHub raw URL
+MODEL_URL = os.environ.get("MODEL_URL", 'http://github.com/Cabarrubias-Ryan/SoilSnapModel/final_model_20251027_131112.h5')  # GitHub raw URL
 
 # ----------------------
 # Download model if missing
