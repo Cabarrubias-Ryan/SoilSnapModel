@@ -24,7 +24,7 @@ MODEL_FILENAME = "final_model_20251027_131112.h5"
 MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
 MODEL_URL = os.environ.get(
     "MODEL_URL",
-    "https://raw.githubusercontent.com/Cabarrubias-Ryan/SoilSnapModel/main/final_model_20251027_131112.h5"
+    "https://github.com/Cabarrubias-Ryan/SoilSnapModel/raw/refs/heads/main/final_model_20251027_131112.h5"
 )
 
 # ----------------------
@@ -127,4 +127,5 @@ def predict():
 # Run locally (development)
 # ----------------------
 if __name__ == '__main__':
-    app.run(port=5001, host='0.0.0.0')
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
