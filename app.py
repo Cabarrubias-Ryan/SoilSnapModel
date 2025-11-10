@@ -24,7 +24,7 @@ MODEL_FILENAME = "final_model_20251027_131112.h5"
 MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
 MODEL_URL = os.environ.get(
     "MODEL_URL",
-    "https://raw.githubusercontent.com/Cabarrubias-Ryan/SoilSnapModel/main/final_model_20251027_131112.h5"
+    "https://github.com/Cabarrubias-Ryan/SoilSnapModel/releases/download/v1.0/final_model_20251027_131112.h5"
 )
 
 def download_model():
