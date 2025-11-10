@@ -27,9 +27,6 @@ MODEL_URL = os.environ.get(
     "https://raw.githubusercontent.com/Cabarrubias-Ryan/SoilSnapModel/main/final_model_20251027_131112.h5"
 )
 
-# ----------------------
-# Download model if missing or corrupted
-# ----------------------
 def download_model():
     if os.path.exists(MODEL_PATH):
         # Try loading to verify file integrity
