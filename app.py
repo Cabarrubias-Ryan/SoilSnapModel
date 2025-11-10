@@ -49,6 +49,46 @@ def download_model():
                     if chunk:
                         tmp.write(chunk)
                 tmp_path = tmp.name
+
+        # Quick check: HDF5 files start with the 8-byte signature: b"\x89HDF\r\n\x1a\n"
+        with open(tmp_path, 'rb') as f:
+            header = f.read(512)
+
+        hdf5_sig = b"\x89HDF\r\n\x1a\n"
+        if not header.startswith(hdf5_sig):
+            # Read a text preview for diagnostics (many LFS pointers or HTML pages are text)
+            text_preview = None
+            try:
+                text_preview = header.decode('utf-8', errors='replace')
+            except Exception:
+                text_preview = '<binary data cannot be decoded>'
+
+            # Remove the invalid download to avoid leaving a corrupt file
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+            # Check for common Git LFS pointer marker
+            if text_preview and 'version https://git-lfs.github.com/spec/v1' in text_preview:
+                extra = (
+                    'The downloaded file looks like a Git LFS pointer (text) rather than the real .h5 binary. '
+                    'GitHub raw URLs for LFS-tracked files return a pointer, not the binary. '
+                    'Host the .h5 as a release asset, S3/GCS public object, or set MODEL_URL to a direct binary URL.'
+                )
+            elif text_preview and ('<html' in text_preview.lower() or 'not found' in text_preview.lower()):
+                extra = (
+                    'The downloaded file looks like an HTML error page (404/403). Verify MODEL_URL is correct and publicly accessible.'
+                )
+            else:
+                extra = 'The downloaded file does not have a valid HDF5 header.'
+
+            logger.error('Downloaded model file is invalid: %s\nPreview:\n%s', extra, text_preview)
+            raise RuntimeError(
+                'Downloaded model is not a valid HDF5 file. ' + extra + ' See logs for a preview of the downloaded content.'
+            )
+
+        # Replace existing path with verified file
         os.replace(tmp_path, MODEL_PATH)
         logger.info("Model downloaded successfully to %s", MODEL_PATH)
     except Exception as e:
