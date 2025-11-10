@@ -21,13 +21,28 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ----------------------
 MODEL_FILENAME = "final_model_20251027_131112.h5"
-MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
+# Allow baking the model into the image or using a custom path:
+MODEL_PATH_OVERRIDE = os.environ.get("MODEL_PATH_OVERRIDE")  # optional full path to .h5
+if MODEL_PATH_OVERRIDE:
+    MODEL_PATH = os.path.abspath(MODEL_PATH_OVERRIDE)
+else:
+    MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILENAME)
+
+# Default model URL points to the GitHub release asset (direct binary)
 MODEL_URL = os.environ.get(
     "MODEL_URL",
     "https://github.com/Cabarrubias-Ryan/SoilSnapModel/releases/download/v1.0/final_model_20251027_131112.h5"
 )
 
+# Confidence threshold used for "not soil" detection
+CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.5"))
+
 def download_model():
+    # If override path exists, we won't download
+    if MODEL_PATH_OVERRIDE and os.path.exists(MODEL_PATH):
+        logger.info("MODEL_PATH_OVERRIDE set and file exists at %s, skipping download.", MODEL_PATH)
+        return
+
     if os.path.exists(MODEL_PATH):
         # Try loading to verify file integrity
         try:
@@ -98,14 +113,23 @@ def download_model():
 # ----------------------
 # Load model safely
 # ----------------------
+model = None
+_model_loaded = False
 try:
-    download_model()
-    logger.info("Loading model...")
+    # If a local override path exists, prefer it; otherwise download if needed.
+    if MODEL_PATH_OVERRIDE and os.path.exists(MODEL_PATH):
+        logger.info("Using MODEL_PATH_OVERRIDE at %s", MODEL_PATH)
+    else:
+        download_model()
+
+    logger.info("Loading model from %s ...", MODEL_PATH)
     model = load_model(MODEL_PATH)
+    _model_loaded = True
     logger.info("Model loaded successfully")
 except Exception as e:
     logger.exception("Failed to load model: %s", e)
     model = None  # Prevent app from crashing immediately
+    _model_loaded = False
 
 # ----------------------
 # Image preprocessing
@@ -145,7 +169,7 @@ def predict():
 
         logger.info('Predicted class: %s (confidence %.4f)', predicted_class, confidence)
 
-        if confidence < 0.5:
+        if confidence < CONFIDENCE_THRESHOLD:
             return jsonify({
                 'error': 'Image does not appear to be soil.',
                 'confidence': confidence
@@ -159,6 +183,19 @@ def predict():
     except Exception as e:
         logger.exception("Prediction error: %s", e)
         return jsonify({'error': str(e)}), 500
+
+# ----------------------
+# Health endpoint
+# ----------------------
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'model_loaded': _model_loaded,
+        'model_path': MODEL_PATH,
+        'model_url': MODEL_URL,
+        'confidence_threshold': CONFIDENCE_THRESHOLD,
+        'classes': class_names,
+    })
 
 # ----------------------
 # Run locally (development)
