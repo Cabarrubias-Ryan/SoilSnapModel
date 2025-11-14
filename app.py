@@ -162,27 +162,34 @@ def predict():
         image_bytes = image_file.read()
 
         processed = preprocess_image(image_bytes)
-        prediction = model.predict(processed)
-        predicted_class_index = int(np.argmax(prediction))
+        prediction = model.predict(processed)  # shape (1, 10)
+        probs = prediction[0].tolist()
+
+        predicted_class_index = int(np.argmax(probs))
         predicted_class = class_names[predicted_class_index]
-        confidence = float(np.max(prediction))
+        confidence = float(probs[predicted_class_index])
 
         logger.info('Predicted class: %s (confidence %.4f)', predicted_class, confidence)
 
         if confidence < CONFIDENCE_THRESHOLD:
             return jsonify({
                 'error': 'Image does not appear to be soil.',
-                'confidence': confidence
+                'confidence': confidence,
+                'probabilities': probs,
+                'classes': class_names
             }), 400
 
         return jsonify({
             'prediction': predicted_class,
-            'confidence': confidence
+            'confidence': confidence,
+            'probabilities': probs,
+            'classes': class_names
         })
 
     except Exception as e:
         logger.exception("Prediction error: %s", e)
         return jsonify({'error': str(e)}), 500
+
 
 # ----------------------
 # Health endpoint
